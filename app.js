@@ -1,31 +1,49 @@
 //jshint esversion:6
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
 const ejs = require("ejs");
-const encrypt = require('mongoose-encryption');
 const PORT = 3000;
 const app = express();
 
-
+// App use
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
+app.use(
+  session({
+    secret: "Our little secret.",
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+//App Set
 app.set("view engine", "ejs");
 
 //Mongoose connection
 mongoose.connect("mongodb://localhost:27017/UserDB", { useNewUrlParser: true });
 
-const userSchema = new mongoose.Schema ({
+const userSchema = new mongoose.Schema({
   email: String,
   password: String,
 });
 
-
-userSchema.plugin(encrypt, { secret: process.env.SECRET, encryptedFields: ['password'] });
+// plugin for passport-local-mongoose
+userSchema.plugin(passportLocalMongoose);
 
 const User = new mongoose.model("User", userSchema);
 
+passport.use(User.createStrategy());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 // The Homepage Route
 app.get("/", (req, res) => {
@@ -42,44 +60,54 @@ app.get("/login", (req, res) => {
   res.render("login");
 });
 
+app.get("/secrets", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.render("secrets");
+  } else {
+    res.redirect("/login");
+  }
+});
+
 //register Post route
 app.post("/register", (req, res) => {
-  const newUser = new User({
-    email: req.body.username,
-    password: req.body.password,
-  });
-
-  newUser.save((err) => {
-    if (err) {
-      console.log(err);
-    } else {
-      res.render("secrets");
+  User.register(
+    { username: req.body.username },
+    req.body.password,
+    (err, user) => {
+      if (err) {
+        console.log(err);
+        res.redirect("/register");
+      } else {
+        passport.authenticate("local")(req, res, function () {
+          res.redirect("/secrets");
+        });
+      }
     }
-  });
+  );
 });
 
 //Login Post Route
 app.post("/login", (req, res) => {
-    const username = req.body.username;
-    const password = req.body.password;
+  const user = new User({
+    username: req.body.username,
+    password: req.body.password,
+  });
 
-    User.findOne({email: username}, (err, foundUser) => {
-        if(err){
-            console.log(err);
-        } else {
-            if(foundUser){
-                if(foundUser.password === password){
-                    res.render("secrets")
-                }
-            }
-        }
-    })
-})
+  req.login(user, function (err) {
+    if (err) {
+      console.log(err);
+    } else {
+      passport.authenticate("local")(req, res, function () {
+        res.redirect("/secrets");
+      });
+    }
+  });
+});
 
 app.listen(PORT, (err, response) => {
   if (err) {
     console.log("Error Connectiing to Server");
   } else {
-    console.log(`Connect to Port ${PORT}`);
+    console.log(`Connected to Port ${PORT}`);
   }
 });
